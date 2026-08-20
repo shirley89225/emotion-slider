@@ -1,0 +1,6 @@
+{
+  "name": "情緒滑桿 Emotion Slider",
+  "description": "專為諮商與對話情境設計的即時情緒狀態滑桿與陪伴同步系統，支援雙端即時連線、平滑色彩過渡與溫暖反饋互動。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
