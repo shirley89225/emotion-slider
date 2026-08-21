@@ -5,6 +5,8 @@ import {
   updateFirebaseRoom,
   getStoredFirebaseConfig,
 } from "../utils/firebaseRealtime";
+import { WebRTCRoomManager, WebRTCConnectionStatus } from "../utils/webrtcSync";
+import { PublicWebSocketRelay } from "../utils/publicMqttRelay";
 
 const DEFAULT_STATE: EmotionState = {
   value: 50,
@@ -16,17 +18,42 @@ const DEFAULT_STATE: EmotionState = {
   updatedAt: Date.now(),
 };
 
+export const BACKEND_URL_STORAGE_KEY = "emotion_slider_custom_backend_url";
+
+export function getStoredBackendUrl(): string {
+  try {
+    return localStorage.getItem(BACKEND_URL_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveStoredBackendUrl(url: string) {
+  try {
+    if (!url.trim()) {
+      localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
+    } else {
+      localStorage.setItem(BACKEND_URL_STORAGE_KEY, url.trim().replace(/\/+$/, ""));
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export function useRoomSync(roomId: string, role: UserRole) {
   const [state, setState] = useState<EmotionState>(DEFAULT_STATE);
   const [peerCount, setPeerCount] = useState<number>(1);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [connectionMethod, setConnectionMethod] = useState<string>("connecting");
   const [incomingReaction, setIncomingReaction] = useState<ReactionMessage | null>(null);
 
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const webrtcManagerRef = useRef<WebRTCRoomManager | null>(null);
+  const publicRelayRef = useRef<PublicWebSocketRelay | null>(null);
   const isLocalUpdateRef = useRef<boolean>(false);
   const debounceTimerRef = useRef<any>(null);
 
-  // Initialize BroadcastChannel for instant local multi-tab testing
+  // 1. Initialize BroadcastChannel for instant local multi-tab testing
   useEffect(() => {
     if (typeof window !== "undefined" && "BroadcastChannel" in window) {
       const channel = new BroadcastChannel(`emotion_slider_${roomId}`);
@@ -34,13 +61,13 @@ export function useRoomSync(roomId: string, role: UserRole) {
 
       channel.onmessage = (event) => {
         const { type, payload } = event.data;
-        if (type === "STATE_UPDATE") {
+        if (type === "STATE_UPDATE" && payload) {
           setState((prev) => ({
             ...prev,
             ...payload,
             updatedAt: payload.updatedAt || Date.now(),
           }));
-        } else if (type === "REACTION") {
+        } else if (type === "REACTION" && payload) {
           setIncomingReaction(payload);
         }
       };
@@ -51,17 +78,75 @@ export function useRoomSync(roomId: string, role: UserRole) {
     }
   }, [roomId]);
 
-  // Connect to SSE (Server-Sent Events) backend
+  // 2. Initialize WebRTC P2P + Public Relay (Zero Setup) + Backend SSE + Firebase RTDB
   useEffect(() => {
-    let eventSource: EventSource | null = null;
+    if (!roomId || role === "none") return;
+
     let isSubscribed = true;
 
+    // Handle Incoming State from any channel
+    const handleRemoteStateUpdate = (remoteState: EmotionState) => {
+      if (!isSubscribed || !remoteState) return;
+      setState((prev) => ({
+        ...prev,
+        ...remoteState,
+        updatedAt: remoteState.updatedAt || Date.now(),
+      }));
+      setIsConnected(true);
+    };
+
+    // Handle Incoming Reaction
+    const handleRemoteReaction = (reaction: ReactionMessage) => {
+      if (!isSubscribed || !reaction) return;
+      setIncomingReaction(reaction);
+    };
+
+    // A. WebRTC P2P Channel (No server required, direct device-to-device)
     try {
-      eventSource = new EventSource(`/api/rooms/${encodeURIComponent(roomId)}/events?role=${role}`);
+      const webrtc = new WebRTCRoomManager(
+        roomId,
+        role === "listener" ? "listener" : "speaker",
+        handleRemoteStateUpdate,
+        handleRemoteReaction,
+        (status: WebRTCConnectionStatus, count: number) => {
+          if (!isSubscribed) return;
+          if (status === "connected") {
+            setIsConnected(true);
+            setConnectionMethod("p2p");
+            if (count > 0) setPeerCount(count);
+          }
+        }
+      );
+      webrtcManagerRef.current = webrtc;
+    } catch (err) {
+      console.warn("WebRTC manager failed:", err);
+    }
+
+    // B. Public Relay Fallback
+    try {
+      const relay = new PublicWebSocketRelay(
+        roomId,
+        handleRemoteStateUpdate,
+        handleRemoteReaction
+      );
+      publicRelayRef.current = relay;
+    } catch (err) {
+      console.warn("Public relay failed:", err);
+    }
+
+    // C. Backend SSE (Local dev server or custom backend URL)
+    let eventSource: EventSource | null = null;
+    const customBackend = getStoredBackendUrl();
+    const sseBase = customBackend || "";
+
+    try {
+      const sseUrl = `${sseBase}/api/rooms/${encodeURIComponent(roomId)}/events?role=${role}`;
+      eventSource = new EventSource(sseUrl);
 
       eventSource.onopen = () => {
         if (isSubscribed) {
           setIsConnected(true);
+          setConnectionMethod("server");
         }
       };
 
@@ -69,22 +154,13 @@ export function useRoomSync(roomId: string, role: UserRole) {
         try {
           const data = JSON.parse(event.data);
           if (isSubscribed) {
-            setState({
-              value: data.value ?? 50,
-              note: data.note || "",
-              tag: data.tag || "平穩",
-              selectedEmotions: Array.isArray(data.selectedEmotions) ? data.selectedEmotions : [],
-              customGuidance: data.customGuidance || "",
-              isAdjusting: Boolean(data.isAdjusting),
-              updatedAt: data.updatedAt || Date.now(),
-              lastReaction: data.lastReaction,
-            });
+            handleRemoteStateUpdate(data);
             if (data.peerCount) {
               setPeerCount(data.peerCount);
             }
           }
-        } catch (e) {
-          console.error("Failed to parse init data", e);
+        } catch {
+          // ignore
         }
       });
 
@@ -92,19 +168,10 @@ export function useRoomSync(roomId: string, role: UserRole) {
         try {
           const data = JSON.parse(event.data);
           if (isSubscribed) {
-            setState({
-              value: data.value ?? 50,
-              note: data.note || "",
-              tag: data.tag || "平穩",
-              selectedEmotions: Array.isArray(data.selectedEmotions) ? data.selectedEmotions : [],
-              customGuidance: data.customGuidance || "",
-              isAdjusting: Boolean(data.isAdjusting),
-              updatedAt: data.updatedAt || Date.now(),
-              lastReaction: data.lastReaction,
-            });
+            handleRemoteStateUpdate(data);
           }
-        } catch (e) {
-          console.error("Failed to parse state update", e);
+        } catch {
+          // ignore
         }
       });
 
@@ -114,8 +181,8 @@ export function useRoomSync(roomId: string, role: UserRole) {
           if (isSubscribed && typeof data.count === "number") {
             setPeerCount(data.count);
           }
-        } catch (e) {
-          console.error("Failed to parse peer count", e);
+        } catch {
+          // ignore
         }
       });
 
@@ -123,29 +190,21 @@ export function useRoomSync(roomId: string, role: UserRole) {
         try {
           const reaction = JSON.parse(event.data);
           if (isSubscribed) {
-            setIncomingReaction(reaction);
+            handleRemoteReaction(reaction);
           }
-        } catch (e) {
-          console.error("Failed to parse reaction", e);
+        } catch {
+          // ignore
         }
       });
-
-      eventSource.onerror = () => {
-        if (isSubscribed) {
-          setIsConnected(false);
-        }
-      };
-    } catch (err) {
-      console.warn("SSE Connection error", err);
+    } catch {
+      // ignore SSE fail on static host
     }
 
-    // Optional Firebase RTDB subscriber
+    // D. Firebase RTDB (If configured by user)
     const unsubFirebase = subscribeFirebaseRoom(roomId, (fbState) => {
       if (isSubscribed && fbState) {
-        setState((prev) => ({
-          ...prev,
-          ...fbState,
-        }));
+        handleRemoteStateUpdate(fbState);
+        setConnectionMethod("firebase");
       }
     });
 
@@ -157,10 +216,18 @@ export function useRoomSync(roomId: string, role: UserRole) {
       if (unsubFirebase) {
         unsubFirebase();
       }
+      if (webrtcManagerRef.current) {
+        webrtcManagerRef.current.destroy();
+        webrtcManagerRef.current = null;
+      }
+      if (publicRelayRef.current) {
+        publicRelayRef.current.destroy();
+        publicRelayRef.current = null;
+      }
     };
   }, [roomId, role]);
 
-  // Update room state (Used by Speaker)
+  // Update room state (Used by Speaker or Listener)
   const updateEmotion = useCallback(
     (partial: Partial<EmotionState>, immediate: boolean = false) => {
       isLocalUpdateRef.current = true;
@@ -173,7 +240,25 @@ export function useRoomSync(roomId: string, role: UserRole) {
       // Optimistic local update
       setState(nextState);
 
-      // Broadcast to other tabs on the same computer immediately
+      // 1. Broadcast via WebRTC P2P
+      if (webrtcManagerRef.current) {
+        try {
+          webrtcManagerRef.current.broadcastState(nextState);
+        } catch {
+          // ignore
+        }
+      }
+
+      // 2. Broadcast via Public WebSocket Relay
+      if (publicRelayRef.current) {
+        try {
+          publicRelayRef.current.broadcast(nextState);
+        } catch {
+          // ignore
+        }
+      }
+
+      // 3. Broadcast to other tabs on the same computer
       if (broadcastChannelRef.current) {
         try {
           broadcastChannelRef.current.postMessage({
@@ -185,18 +270,23 @@ export function useRoomSync(roomId: string, role: UserRole) {
         }
       }
 
-      // Sync with Firebase RTDB if configured
+      // 4. Sync with Firebase RTDB if configured
       if (getStoredFirebaseConfig()) {
         updateFirebaseRoom(roomId, nextState);
       }
 
-      // Debounced or immediate sync to Express backend
+      // 5. Sync to Node.js Backend API if available
+      const customBackend = getStoredBackendUrl();
+      const apiEndpoint = `${customBackend || ""}/api/rooms/${encodeURIComponent(roomId)}/update`;
+
       const sendToServer = () => {
-        fetch(`/api/rooms/${encodeURIComponent(roomId)}/update`, {
+        fetch(apiEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(nextState),
-        }).catch((err) => console.warn("Failed to sync room state", err));
+        }).catch(() => {
+          // quiet catch for static hosting
+        });
       };
 
       if (immediate) {
@@ -208,7 +298,7 @@ export function useRoomSync(roomId: string, role: UserRole) {
         if (debounceTimerRef.current) {
           clearTimeout(debounceTimerRef.current);
         }
-        debounceTimerRef.current = setTimeout(sendToServer, 60);
+        debounceTimerRef.current = setTimeout(sendToServer, 50);
       }
     },
     [roomId, state]
@@ -227,7 +317,17 @@ export function useRoomSync(roomId: string, role: UserRole) {
       // Local optimistic reaction trigger
       setIncomingReaction(reactionPayload);
 
-      // Broadcast channel for local tab sync
+      // WebRTC P2P
+      if (webrtcManagerRef.current) {
+        webrtcManagerRef.current.sendReaction(reactionPayload);
+      }
+
+      // Public Relay
+      if (publicRelayRef.current) {
+        publicRelayRef.current.sendReaction(reactionPayload);
+      }
+
+      // Broadcast channel
       if (broadcastChannelRef.current) {
         try {
           broadcastChannelRef.current.postMessage({
@@ -239,14 +339,17 @@ export function useRoomSync(roomId: string, role: UserRole) {
         }
       }
 
+      const customBackend = getStoredBackendUrl();
+      const apiEndpoint = `${customBackend || ""}/api/rooms/${encodeURIComponent(roomId)}/reaction`;
+
       try {
-        await fetch(`/api/rooms/${encodeURIComponent(roomId)}/reaction`, {
+        await fetch(apiEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text, sender: senderName }),
         });
-      } catch (err) {
-        console.warn("Failed to send reaction", err);
+      } catch {
+        // quiet catch
       }
     },
     [roomId]
@@ -256,6 +359,7 @@ export function useRoomSync(roomId: string, role: UserRole) {
     state,
     peerCount,
     isConnected,
+    connectionMethod,
     incomingReaction,
     updateEmotion,
     sendReaction,

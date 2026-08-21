@@ -12,11 +12,20 @@ import {
   Key,
   Save,
   RotateCcw,
+  Zap,
+  Globe,
+  Radio,
+  Server,
+  HelpCircle,
 } from "lucide-react";
 import {
   getStoredFirebaseConfig,
   saveFirebaseConfig,
 } from "../utils/firebaseRealtime";
+import {
+  getStoredBackendUrl,
+  saveStoredBackendUrl,
+} from "../hooks/useRoomSync";
 import { FirebaseConfigOptions } from "../types";
 
 interface FirebaseGuideModalProps {
@@ -28,15 +37,24 @@ export const FirebaseGuideModal: React.FC<FirebaseGuideModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const [activeTab, setActiveTab] = useState<"p2p" | "server" | "firebase">("p2p");
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+
+  // Custom backend url state
+  const [backendUrl, setBackendUrl] = useState<string>("");
+  const [backendSavedSuccess, setBackendSavedSuccess] = useState<boolean>(false);
+
+  // Firebase states
   const [apiKey, setApiKey] = useState<string>("");
   const [authDomain, setAuthDomain] = useState<string>("");
   const [databaseURL, setDatabaseURL] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
-  const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+  const [firebaseSavedSuccess, setFirebaseSavedSuccess] = useState<boolean>(false);
 
   useEffect(() => {
     if (isOpen) {
+      setBackendUrl(getStoredBackendUrl());
+
       const stored = getStoredFirebaseConfig();
       if (stored) {
         setApiKey(stored.apiKey || "");
@@ -55,12 +73,19 @@ export const FirebaseGuideModal: React.FC<FirebaseGuideModalProps> = ({
     setTimeout(() => setCopiedSection(null), 2000);
   };
 
+  const handleSaveBackendUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveStoredBackendUrl(backendUrl);
+    setBackendSavedSuccess(true);
+    setTimeout(() => setBackendSavedSuccess(false), 2000);
+  };
+
   const handleSaveCustomFirebase = (e: React.FormEvent) => {
     e.preventDefault();
     if (!databaseURL.trim()) {
       saveFirebaseConfig(null);
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 2500);
+      setFirebaseSavedSuccess(true);
+      setTimeout(() => setFirebaseSavedSuccess(false), 2500);
       return;
     }
 
@@ -70,213 +95,267 @@ export const FirebaseGuideModal: React.FC<FirebaseGuideModalProps> = ({
       databaseURL: databaseURL.trim(),
       projectId: projectId.trim(),
     };
+
     saveFirebaseConfig(config);
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+    setFirebaseSavedSuccess(true);
+    setTimeout(() => setFirebaseSavedSuccess(false), 2500);
   };
 
-  const handleClearConfig = () => {
-    setApiKey("");
-    setAuthDomain("");
-    setDatabaseURL("");
-    setProjectId("");
-    saveFirebaseConfig(null);
-  };
-
-  const rulesExample = `{
+  const sampleRules = `{
   "rules": {
-    "rooms": {
-      "$roomId": {
-        ".read": true,
-        ".write": true
-      }
-    }
+    ".read": true,
+    ".write": true
   }
 }`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-stone-200 space-y-6 relative my-8 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-stone-900/60 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-3xl max-w-2xl w-full p-5 sm:p-7 shadow-2xl border border-stone-200 space-y-5 relative max-h-[90vh] overflow-y-auto animate-scale-up text-stone-900">
+        {/* Close Button */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-5 right-5 p-2 text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-100 transition-colors"
+          className="absolute top-5 right-5 p-2 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-xs font-semibold text-amber-900">
-            <Flame className="w-3.5 h-3.5 text-amber-600 fill-amber-600" />
-            <span>Firebase Realtime Database 設定指南</span>
+        {/* Modal Title */}
+        <div className="space-y-1 pr-8">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 text-xs font-bold">
+            <Radio className="w-3.5 h-3.5 animate-pulse" />
+            <span>跨裝置即時同步管道</span>
           </div>
-          <h3 className="text-xl font-bold text-stone-900">
-            如何在 Firebase Console 啟用即時同步？
+          <h3 className="text-xl sm:text-2xl font-black text-stone-900 tracking-tight">
+            即時連線與同步設定
           </h3>
-          <p className="text-xs text-stone-500">
-            本 App 預設已內建零延遲的即時通訊服務；若您希望連接個人的 Firebase 專案，請參考以下 4 個簡易步驟：
+          <p className="text-xs sm:text-sm text-stone-600">
+            在 Hostinger 等靜態網站主機上，系統已內建多重同步機制，確保不同手機或電腦可即時互通。
           </p>
         </div>
 
-        {/* 4-Step Visual Guide */}
-        <div className="space-y-4 text-xs">
-          {/* Step 1 */}
-          <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/90 space-y-2">
-            <div className="flex items-center gap-2 font-bold text-stone-900 text-sm">
-              <span className="w-5 h-5 rounded-full bg-stone-900 text-white flex items-center justify-center text-xs">
-                1
-              </span>
-              <span>前往 Firebase Console 建立專案</span>
-            </div>
-            <p className="text-stone-600 leading-relaxed pl-7">
-              打開{" "}
-              <a
-                href="https://console.firebase.google.com/"
-                target="_blank"
-                rel="noreferrer"
-                className="text-amber-700 font-semibold underline inline-flex items-center gap-0.5"
-              >
-                Firebase Console <ExternalLink className="w-3 h-3" />
-              </a>{" "}
-              並點擊「新增專案 (Add Project)」，輸入專案名稱（例如：<code>emotion-slider</code>）。
-            </p>
-          </div>
-
-          {/* Step 2 */}
-          <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/90 space-y-2">
-            <div className="flex items-center gap-2 font-bold text-stone-900 text-sm">
-              <span className="w-5 h-5 rounded-full bg-stone-900 text-white flex items-center justify-center text-xs">
-                2
-              </span>
-              <span>啟用 Realtime Database</span>
-            </div>
-            <p className="text-stone-600 leading-relaxed pl-7">
-              在左側導航選單中點擊 <strong>Build (建構)</strong> &gt;{" "}
-              <strong>Realtime Database</strong>，接著點選「<strong>建立資料庫 (Create Database)</strong>」，選擇離您最近的地理區域（例如：<code>asia-southeast1</code> 或 <code>us-central1</code>）。
-            </p>
-          </div>
-
-          {/* Step 3 */}
-          <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/90 space-y-2">
-            <div className="flex items-center gap-2 font-bold text-stone-900 text-sm">
-              <span className="w-5 h-5 rounded-full bg-stone-900 text-white flex items-center justify-center text-xs">
-                3
-              </span>
-              <span>配置安全規則 (Security Rules)</span>
-            </div>
-            <p className="text-stone-600 leading-relaxed pl-7">
-              切換至「<strong>規則 (Rules)</strong>」頁籤，貼上以下房間讀寫規則，讓擁有相同房號的使用者可以即時同步情緒數值：
-            </p>
-            <div className="pl-7 relative">
-              <pre className="bg-stone-900 text-emerald-400 p-3 rounded-xl font-mono text-[11px] overflow-x-auto">
-                {rulesExample}
-              </pre>
-              <button
-                onClick={() => handleCopy(rulesExample, "rules")}
-                className="absolute top-2 right-2 px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-white rounded-lg text-[10px] font-mono flex items-center gap-1 transition-colors"
-              >
-                {copiedSection === "rules" ? (
-                  <>
-                    <Check className="w-3 h-3 text-emerald-400" />
-                    <span>已複製</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3 h-3" />
-                    <span>複製規則</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Step 4 */}
-          <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/90 space-y-2">
-            <div className="flex items-center gap-2 font-bold text-stone-900 text-sm">
-              <span className="w-5 h-5 rounded-full bg-stone-900 text-white flex items-center justify-center text-xs">
-                4
-              </span>
-              <span>新增 Web 應用並複製 Database URL</span>
-            </div>
-            <p className="text-stone-600 leading-relaxed pl-7">
-              在「專案設定 (Project Settings)」中點擊 <strong>&lt;/&gt; Web</strong> 註冊應用，取得 <code>databaseURL</code> 與 <code>apiKey</code>。
-            </p>
-          </div>
+        {/* Tabs */}
+        <div className="flex bg-stone-100 p-1.5 rounded-2xl gap-1 text-xs font-bold">
+          <button
+            type="button"
+            onClick={() => setActiveTab("p2p")}
+            className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+              activeTab === "p2p"
+                ? "bg-white text-stone-900 shadow-xs"
+                : "text-stone-600 hover:text-stone-900"
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            <span>P2P 免費通道 (推薦)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("server")}
+            className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+              activeTab === "server"
+                ? "bg-white text-stone-900 shadow-xs"
+                : "text-stone-600 hover:text-stone-900"
+            }`}
+          >
+            <Server className="w-3.5 h-3.5 text-sky-500" />
+            <span>自訂後端伺服器</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("firebase")}
+            className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+              activeTab === "firebase"
+                ? "bg-white text-stone-900 shadow-xs"
+                : "text-stone-600 hover:text-stone-900"
+            }`}
+          >
+            <Flame className="w-3.5 h-3.5 text-orange-500" />
+            <span>Firebase 診斷與設定</span>
+          </button>
         </div>
 
-        {/* Optional Custom Configuration Form */}
-        <div className="pt-2 border-t border-stone-100 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
-              <Key className="w-4 h-4 text-stone-500" />
-              <span>自訂 Firebase 連線資訊 (可選)</span>
+        {/* Tab 1: WebRTC P2P (Zero config) */}
+        {activeTab === "p2p" && (
+          <div className="space-y-4 text-xs sm:text-sm">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 sm:p-5 space-y-3">
+              <div className="flex items-center gap-2 text-emerald-900 font-extrabold text-sm">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                <span>系統已內建啟用 WebRTC P2P 與公共通道</span>
+              </div>
+              <p className="text-emerald-800 leading-relaxed">
+                您<strong>完全不需要申請任何帳號或設定金鑰</strong>！只要兩台裝置輸入相同的房間代碼（例如 <code className="bg-emerald-150 px-1.5 py-0.5 rounded font-mono font-bold">ROOM-8888</code>），一人選擇分享者、一人選擇陪伴者，瀏覽器便會透過 P2P 建立加密的直接通訊。
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={handleClearConfig}
-              className="text-[11px] text-stone-400 hover:text-rose-600 transition-colors flex items-center gap-1"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>清除自訂配置 (恢復預設即時伺服器)</span>
-            </button>
-          </div>
 
-          <form onSubmit={handleSaveCustomFirebase} className="space-y-3">
-            <div>
-              <label className="block text-[11px] font-semibold text-stone-600 mb-1">
-                Database URL (例如: https://my-app-default-rtdb.firebaseio.com)
+            <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 space-y-2">
+              <div className="font-bold text-stone-900 flex items-center gap-1.5">
+                <HelpCircle className="w-4 h-4 text-stone-500" />
+                <span>使用技巧與注意事項：</span>
+              </div>
+              <ul className="list-disc list-inside space-y-1.5 text-stone-600 pl-1 leading-relaxed">
+                <li>請先讓「<strong>分享者 (Speaker)</strong>」進入房間，隨後「<strong>陪伴者 (Listener)</strong>」進入即可自動對接。</li>
+                <li>支援手機 4G/5G 跨家用 WiFi 連線，延遲極低。</li>
+                <li>若所在網路環境（如特殊公司防火牆）阻擋 P2P，系統會自動轉由公共 WebSocket 備援通道傳輸。</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Custom Backend Server */}
+        {activeTab === "server" && (
+          <form onSubmit={handleSaveBackendUrl} className="space-y-4 text-xs sm:text-sm">
+            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-4 space-y-2">
+              <div className="font-bold text-sky-950 flex items-center gap-1.5">
+                <Server className="w-4 h-4 text-sky-600" />
+                <span>連接自建或免費雲端後端 (Render / Railway / VPS)</span>
+              </div>
+              <p className="text-sky-800 text-xs leading-relaxed">
+                您可以將專案的 <code className="font-mono bg-sky-100 px-1 py-0.5 rounded">server.ts</code> 免費一鍵部署在 <strong>Render.com</strong> 或 <strong>Railway.app</strong>，並在此填入後端 API 網址，讓 Hostinger 靜態前端直接與專屬伺服器連線。
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block font-bold text-stone-700 text-xs">
+                後端伺服器 API 網址 (Backend Server URL)
               </label>
               <input
-                type="text"
-                value={databaseURL}
-                onChange={(e) => setDatabaseURL(e.target.value)}
-                placeholder="https://your-project-id.firebaseio.com"
-                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-800 focus:bg-white focus:outline-hidden"
+                type="url"
+                value={backendUrl}
+                onChange={(e) => setBackendUrl(e.target.value)}
+                placeholder="例如: https://my-slider-api.onrender.com"
+                className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-800 focus:bg-white focus:outline-hidden"
               />
+              <p className="text-[11px] text-stone-500">
+                留空表示使用本機或 P2P 模式。
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div>
-                <label className="block text-[11px] font-semibold text-stone-600 mb-1">
-                  API Key
-                </label>
-                <input
-                  type="text"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-800 focus:bg-white focus:outline-hidden"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-stone-600 mb-1">
-                  Project ID
-                </label>
-                <input
-                  type="text"
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                  placeholder="my-emotion-app"
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-800 focus:bg-white focus:outline-hidden"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              {savedSuccess && (
-                <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  已儲存設定
+            <div className="flex items-center justify-between pt-2">
+              {backendSavedSuccess ? (
+                <span className="text-emerald-600 font-bold text-xs flex items-center gap-1">
+                  <CheckCircle2 className="w-4 h-4" /> 伺服器網址已儲存！
                 </span>
+              ) : (
+                <span />
               )}
               <button
                 type="submit"
-                className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                className="px-5 py-2.5 rounded-xl bg-stone-900 text-white font-bold text-xs hover:bg-stone-800 transition-colors shadow-xs"
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>儲存並啟用</span>
+                儲存後端網址
               </button>
             </div>
           </form>
+        )}
+
+        {/* Tab 3: Firebase RTDB & Permission Troubleshooter */}
+        {activeTab === "firebase" && (
+          <form onSubmit={handleSaveCustomFirebase} className="space-y-4 text-xs sm:text-sm">
+            {/* Troubleshooter for Permission Denied */}
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-2">
+              <div className="font-bold text-amber-950 flex items-center gap-1.5">
+                <Shield className="w-4 h-4 text-amber-600" />
+                <span>常見連不上原因：Firebase 規則 (Rules) 尚未開放</span>
+              </div>
+              <p className="text-amber-900 text-xs leading-relaxed">
+                Firebase Realtime Database 預設為禁止讀寫 (<code className="font-mono">false</code>)。請前往 Firebase Console ➔ <strong>Realtime Database</strong> ➔ 點選「<strong>規則 (Rules)</strong>」頁籤，改成以下內容並點選「發布」：
+              </p>
+              <div className="relative bg-stone-900 text-amber-300 p-3 rounded-xl font-mono text-xs overflow-x-auto">
+                <pre>{sampleRules}</pre>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(sampleRules, "rules")}
+                  className="absolute right-2 top-2 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] flex items-center gap-1 transition-colors"
+                >
+                  {copiedSection === "rules" ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedSection === "rules" ? "已複製" : "複製規則"}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Inputs */}
+            <div className="space-y-3">
+              <div>
+                <label className="block font-bold text-stone-700 text-xs mb-1">
+                  databaseURL (必填)
+                </label>
+                <input
+                  type="text"
+                  value={databaseURL}
+                  onChange={(e) => setDatabaseURL(e.target.value)}
+                  placeholder="https://your-project-default-rtdb.firebaseio.com"
+                  className="w-full px-3.5 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-800 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 text-xs mb-1">
+                    apiKey
+                  </label>
+                  <input
+                    type="text"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="AIzaSy..."
+                    className="w-full px-3.5 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-800 focus:bg-white focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-stone-700 text-xs mb-1">
+                    projectId
+                  </label>
+                  <input
+                    type="text"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                    placeholder="my-project-id"
+                    className="w-full px-3.5 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-800 focus:bg-white focus:outline-hidden"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              {firebaseSavedSuccess ? (
+                <span className="text-emerald-600 font-bold text-xs flex items-center gap-1">
+                  <CheckCircle2 className="w-4 h-4" /> Firebase 設定已儲存！
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApiKey("");
+                    setAuthDomain("");
+                    setDatabaseURL("");
+                    setProjectId("");
+                    saveFirebaseConfig(null);
+                  }}
+                  className="text-stone-500 hover:text-rose-600 text-xs font-semibold"
+                >
+                  清除 Firebase 設定
+                </button>
+              )}
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-orange-600 text-white font-bold text-xs hover:bg-orange-700 transition-colors shadow-xs"
+              >
+                儲存 Firebase 設定
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Modal Footer */}
+        <div className="pt-3 border-t border-stone-200 flex items-center justify-between text-xs text-stone-500">
+          <span>只要兩端在相同房間，系統將自動確保連線與即時同步</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-stone-900 text-white font-semibold hover:bg-stone-800 transition-colors"
+          >
+            完成
+          </button>
         </div>
       </div>
     </div>
